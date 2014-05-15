@@ -24,6 +24,7 @@ use Getopt::Std;
 use Filesys::DfPortable;
 use Data::Dumper;
 use File::ReadBackwards;
+use JSON;
 
 use qpid_proton;
 
@@ -65,11 +66,12 @@ sub get_disk_info {
     my $ref = dfportable($dir, 1024);  # output is 1K blocks
 
     if (defined($ref)) {
-        $msg->set_body({"disk" => {"size" => $ref->{blocks}, "used" => $ref->{bavail}}}, qpid::proton::MAP);
+         $msg->set_body(encode_json {"size" => $ref->{blocks}, "used" => $ref->{bavail}});
     } else {
-        $msg->set_body({"disk" => {"size" => "", "used" => "", "error" => "Error getting disk info for $dir"}}, qpid::proton::MAP);
+        $msg->set_body(encode_json {"size" => "error", "used" => "error"});
     }
     # each datum has its own version in case the format changes
+    $msg->get_annotations->{"type"} = "disk";
     $msg->get_annotations->{"version"} = 0.1;
 #print Dumper($msg->get_body());
 
@@ -81,15 +83,14 @@ sub get_log_info {
 
     my $log_dir = "/var/log";
     my @log_files = qw/messages wtmp dmesg/;
-	my $lim = 100; # read last 100 lines of the files
-
+	my $lim = 100; # read last lines of the files
 	my %fails = ();
+
     $msg = new qpid::proton::Message();
 	foreach my $name (@log_files) {
 
 	    my $bw = File::ReadBackwards->new( "$log_dir/$name" );
 		if ( $bw ) {
-
 			while( defined( my $line = $bw->readline ) ) {
 				if ($line =~ /fail/i ) {
 					push @{$fails{ $name }}, $line;
@@ -98,8 +99,9 @@ sub get_log_info {
 			}
 		}
 	}
-#print Dumper(\%fails);
-	$msg->set_body({"logs" => \%fails}, qpid::proton::MAP);
+    $msg->set_body(encode_json \%fails);
+#print Dumper($msg->get_body());
+    $msg->get_annotations->{"type"} = "logs";
     $msg->get_annotations->{"version"} = 0.1;
     return $msg;
 
